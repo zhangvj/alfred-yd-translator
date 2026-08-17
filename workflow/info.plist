@@ -1,0 +1,414 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>bundleid</key>
+	<string>com.zvj.yd-translator</string>
+	<key>connections</key>
+	<dict>
+		<key>A1B2C3D4-0001-4000-8000-000000000001</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>A1B2C3D4-0002-4000-8000-000000000002</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>A1B2C3D4-0002-4000-8000-000000000002</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>A1B2C3D4-0003-4000-8000-000000000003</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>A1B2C3D4-0003-4000-8000-000000000003</string>
+				<key>modifiers</key>
+				<integer>1048576</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<true/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>A1B2C3D4-0003-4000-8000-000000000003</string>
+				<key>modifiers</key>
+				<integer>524288</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<true/>
+			</dict>
+		</array>
+	</dict>
+	<key>createdby</key>
+	<string>zvj</string>
+	<key>description</key>
+	<string>有道翻译：智能识别 API / USER_NAME / well-known 等大小写与分隔符写法，翻译更准确</string>
+	<key>disabled</key>
+	<false/>
+	<key>name</key>
+	<string>YD Translator</string>
+	<key>objects</key>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>action</key>
+				<integer>0</integer>
+				<key>argument</key>
+				<integer>0</integer>
+				<key>focusedappvariable</key>
+				<false/>
+				<key>focusedappvariablename</key>
+				<string></string>
+				<key>hotkey</key>
+				<integer>0</integer>
+				<key>hotmod</key>
+				<integer>0</integer>
+				<key>leftcursor</key>
+				<false/>
+				<key>modsmode</key>
+				<integer>0</integer>
+				<key>relatedAppsMode</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.trigger.hotkey</string>
+			<key>uid</key>
+			<string>A1B2C3D4-0001-4000-8000-000000000001</string>
+			<key>version</key>
+			<integer>2</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<false/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>0</integer>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>keyword</key>
+				<string>yd</string>
+				<key>queuedelaycustom</key>
+				<integer>6</integer>
+				<key>queuedelayimmediatelyinitially</key>
+				<false/>
+				<key>queuedelaymode</key>
+				<integer>2</integer>
+				<key>queuemode</key>
+				<integer>2</integer>
+				<key>runningsubtext</key>
+				<string>正在翻译···</string>
+				<key>script</key>
+				<string>/usr/bin/env python3 yd.py "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>subtext</key>
+				<string>Enter 复制 · Cmd 本地发音 · Alt 在线发音 · Shift 网页预览</string>
+				<key>title</key>
+				<string>有道翻译</string>
+				<key>type</key>
+				<integer>0</integer>
+				<key>withspace</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>A1B2C3D4-0002-4000-8000-000000000002</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>concurrently</key>
+				<false/>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>script</key>
+				<string>/usr/bin/env python3 yd_action.py "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>type</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.script</string>
+			<key>uid</key>
+			<string>A1B2C3D4-0003-4000-8000-000000000003</string>
+			<key>version</key>
+			<integer>2</integer>
+		</dict>
+	</array>
+	<key>readme</key>
+	<string># YD Translator 有道翻译
+
+自定义有道翻译 Alfred 5 工作流，重点修复参考项目对**全大写 / 中划线 / 下划线**单词翻译不准的问题。
+
+## 一、申请有道 API Key
+
+1. 注册有道智云账号: https://ai.youdao.com
+2. 创建「自然语言翻译」服务（文本翻译）
+3. 创建应用并绑定该服务，获得应用 ID (appKey) 与应用密钥 (secret)
+
+## 二、配置工作流
+
+**推荐方式（更新插件后 key/secret 自动保留）：**
+
+在 Alfred 输入:
+- `yd setkey 你的应用ID`
+- `yd setsecret 你的应用密钥`
+- `yd config` 查看配置，`yd reset` 清除凭据
+
+凭据保存在 Workflow Data 目录（更新/替换工作流时自动保留，无需重新输入）。
+
+也可在右上角 [X] 面板填写环境变量（yd_key / yd_secret / yd_to / yd_cn_to / yd_voice / yd_sign），
+环境变量优先级更高；但更新工作流时可能被新版本覆盖，故推荐用 yd setkey 方式。
+
+- yd_key: 应用 ID (appKey)
+- yd_secret: 应用密钥 (secret)
+- yd_to: 非中文文本的目标语言（默认 zh-CHS）
+- yd_cn_to: 中文文本的目标语言（默认 en）
+- yd_voice: 在线发音音色（美音/英音）
+- yd_sign: 签名方式（auto/v3/v1）。早期创建的应用只支持 v1，若提示「签名检验失败」请改为 v1
+
+## 三、使用
+
+- `yd 关键词` 翻译，例如: `yd API`、`yd USER_NAME`、`yd well-known`、`yd 你好世界`
+- Enter: 复制译文（窗口关闭）；Cmd+Enter: 本地发音；Alt+Enter: 有道在线发音（均保持窗口打开）
+- Shift+Enter: 有道网页预览；选中文字后按快捷键直接翻译
+
+## 四、配置快捷键（翻译选中文本）
+
+本工作流内置 Hotkey 触发器（默认未绑定，避免冲突）：
+双击 Hotkey 对象 → Record Hotkey 设置组合键 → Argument 选择「Selection in macOS」。
+
+若「Selection in macOS」无效，请在 系统设置 → 隐私与安全性 → 辅助功能 中勾选 Alfred。
+
+## 五、常见问题
+
+- 提示「应用ID无效/签名检验失败」: 检查 yd_key / yd_secret 是否填写正确
+- 提示「网络请求失败」: 检查网络/代理设置是否拦截了 openapi.youdao.com
+- 未生效: 确认已卸载旧版 YoudaoTranslator 工作流（避免关键字/快捷键冲突）</string>
+	<key>uidata</key>
+	<dict>
+		<key>A1B2C3D4-0001-4000-8000-000000000001</key>
+		<dict>
+			<key>xpos</key>
+			<real>80</real>
+			<key>ypos</key>
+			<real>250</real>
+		</dict>
+		<key>A1B2C3D4-0002-4000-8000-000000000002</key>
+		<dict>
+			<key>xpos</key>
+			<real>300</real>
+			<key>ypos</key>
+			<real>250</real>
+		</dict>
+		<key>A1B2C3D4-0003-4000-8000-000000000003</key>
+		<dict>
+			<key>xpos</key>
+			<real>560</real>
+			<key>ypos</key>
+			<real>250</real>
+		</dict>
+	</dict>
+	<key>userconfigurationconfig</key>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string></string>
+				<key>placeholder</key>
+				<string>有道开放平台应用 ID (appKey)</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<false/>
+			</dict>
+			<key>description</key>
+			<string>在有道智云开放平台创建应用后获取</string>
+			<key>label</key>
+			<string>yd_key</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>yd_key</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string></string>
+				<key>placeholder</key>
+				<string>有道开放平台应用密钥 (secret)</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<false/>
+			</dict>
+			<key>description</key>
+			<string>在有道智云开放平台创建应用后获取</string>
+			<key>label</key>
+			<string>yd_secret</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>yd_secret</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>zh-CHS</string>
+				<key>placeholder</key>
+				<string>zh-CHS</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<false/>
+			</dict>
+			<key>description</key>
+			<string>非中文文本的目标语言（有道语言代码）</string>
+			<key>label</key>
+			<string>yd_to</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>yd_to</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>en</string>
+				<key>placeholder</key>
+				<string>en</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<false/>
+			</dict>
+			<key>description</key>
+			<string>中文文本的目标语言（有道语言代码）</string>
+			<key>label</key>
+			<string>yd_cn_to</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>yd_cn_to</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>en</string>
+				<key>pairs</key>
+				<array>
+					<array>
+						<string>美音 (US)</string>
+						<string>en</string>
+					</array>
+					<array>
+						<string>英音 (UK)</string>
+						<string>uk</string>
+					</array>
+				</array>
+				<key>required</key>
+				<false/>
+			</dict>
+			<key>description</key>
+			<string>Alt+Enter 在线发音音色</string>
+			<key>label</key>
+			<string>yd_voice</string>
+			<key>type</key>
+			<string>popupbutton</string>
+			<key>variable</key>
+			<string>yd_voice</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>auto</string>
+				<key>pairs</key>
+				<array>
+					<array>
+						<string>自动（v3 失败回退 v1，推荐）</string>
+						<string>auto</string>
+					</array>
+					<array>
+						<string>v3（新应用）</string>
+						<string>v3</string>
+					</array>
+					<array>
+						<string>v1（早期创建的应用）</string>
+						<string>v1</string>
+					</array>
+				</array>
+				<key>required</key>
+				<false/>
+			</dict>
+			<key>description</key>
+			<string>签名方式；若旧版应用每次都失败重试，可固定为 v1</string>
+			<key>label</key>
+			<string>yd_sign</string>
+			<key>type</key>
+			<string>popupbutton</string>
+			<key>variable</key>
+			<string>yd_sign</string>
+		</dict>
+	</array>
+	<key>variables</key>
+	<dict>
+		<key>yd_cn_to</key>
+		<string>en</string>
+		<key>yd_key</key>
+		<string></string>
+		<key>yd_secret</key>
+		<string></string>
+		<key>yd_sign</key>
+		<string>auto</string>
+		<key>yd_to</key>
+		<string>zh-CHS</string>
+		<key>yd_voice</key>
+		<string>en</string>
+	</dict>
+	<key>variablesdontexport</key>
+	<array>
+		<string>yd_key</string>
+		<string>yd_secret</string>
+	</array>
+	<key>version</key>
+	<string>1.0.0</string>
+	<key>webaddress</key>
+	<string></string>
+</dict>
+</plist>

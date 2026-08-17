@@ -53,6 +53,10 @@
 
 ### 2. 安装工作流
 
+推荐优先从本仓库 GitHub Releases 下载对应版本的 `yd-translator.alfredworkflow` 安装包并直接导入 Alfred。
+
+如需本地修改后再安装，可使用自定义打包方式：
+
 ```bash
 make build     # 打包为 yd-translator.alfredworkflow（含 plist 校验）
 make install   # 导入 Alfred

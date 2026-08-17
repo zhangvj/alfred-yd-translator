@@ -222,6 +222,12 @@
 		<dict>
 			<key>config</key>
 			<dict>
+				<key>browser</key>
+				<string></string>
+				<key>skipvarencode</key>
+				<false/>
+				<key>spaces</key>
+				<string></string>
 				<key>url</key>
 				<string>{query}</string>
 			</dict>
@@ -230,11 +236,17 @@
 			<key>uid</key>
 			<string>A1B2C3D4-0006-4000-8000-000000000006</string>
 			<key>version</key>
-			<integer>2</integer>
+			<integer>1</integer>
 		</dict>
 		<dict>
 			<key>config</key>
 			<dict>
+				<key>browser</key>
+				<string></string>
+				<key>skipvarencode</key>
+				<false/>
+				<key>spaces</key>
+				<string></string>
 				<key>url</key>
 				<string>{query}</string>
 			</dict>
@@ -243,7 +255,7 @@
 			<key>uid</key>
 			<string>A1B2C3D4-0007-4000-8000-000000000007</string>
 			<key>version</key>
-			<integer>2</integer>
+			<integer>1</integer>
 		</dict>
 	</array>
 	<key>readme</key>

@@ -56,9 +56,12 @@ def build_items(cfg, orig, norm, data):
             .text(copy=row["title"], largetype=row["title"])
             .quicklookurl(quicklook)
             .icon("assets/translate.png")
-            .mod("cmd", "🔊 本地发音 {}".format(speak_word), "speak:local:" + speak_word)
-            .mod("alt", "📣 有道{}发音 {}".format(tts_label, speak_word),
-                 "speak:tts:" + tts_url)
+            # mods 的 arg 直接交给工作流画布上的独立动作节点：
+            #   Enter → 复制到剪贴板（arg=译文）；Cmd → 本地发音（arg=词）；
+            #   Alt → 在线发音（arg=TTS URL）；Shift → 打开有道网页（arg=网页 URL）
+            .mod("cmd", "🔊 本地发音 {}".format(speak_word), speak_word)
+            .mod("alt", "📣 有道{}发音 {}".format(tts_label, speak_word), tts_url)
+            .mod("shift", "🌐 打开有道网页 {}".format(orig), quicklook)
         )
         items.append(item.result())
     return items

@@ -26,6 +26,7 @@ build:
 	@echo "==> 同步版本 v$(VERSION) 到 info.plist"
 	@/usr/libexec/PlistBuddy -c "Set :version $(VERSION)" $(WORKFLOW_DIR)/info.plist
 	@echo "==> 打包 $(BUNDLE)"
+	@rm -f $(BUNDLE)  # 先删旧包，避免 zip 更新模式残留已删除的文件
 	@cd $(WORKFLOW_DIR) && find . -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null; \
 	zip -r ../$(BUNDLE) . -x '*.pyc' '*__pycache__*'
 	@echo "==> 完成: $(BUNDLE) (v$(VERSION))"

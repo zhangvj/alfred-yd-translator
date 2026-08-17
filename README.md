@@ -28,9 +28,9 @@
 ```
 ├── Makefile                  # make test / build / install / clean
 ├── workflow/                 # ← Alfred 工作流包
-│   ├── info.plist            # 工作流定义（Script Filter / Hotkey / 配置界面）
+│   ├── info.plist            # 工作流定义（Script Filter / Hotkey / 流程图 / 配置界面）
 │   ├── yd.py                 # Script Filter 入口
-│   ├── yd_action.py          # 动作分发器（复制 / 本地发音 / 在线发音）
+│   ├── yd_speak.py           # 本地发音动作节点（Cmd+Enter）
 │   └── lib/
 │       ├── normalizer.py     # ★ 智能文本规范化（核心）
 │       ├── detect.py         # 语言检测（汉字/假名/谚文）
@@ -113,10 +113,15 @@ key/secret 会写入 Alfred 的 **Workflow Data 目录**
 | Enter | 复制译文到剪贴板（Alfred 窗口关闭） |
 | Cmd + Enter | macOS 本地发音（say），**Alfred 窗口保持打开** |
 | Alt + Enter | 有道在线发音（美音/英音可配置），**Alfred 窗口保持打开** |
-| Shift + Enter | 有道网页预览 |
+| Shift + Enter | 在浏览器打开有道网页 |
 | 选中文字 + 热键 | 直接翻译选中内容 |
 | `yd setkey` / `yd setsecret` | 保存凭据到数据目录（更新保留） |
 | `yd config` / `yd reset` | 查看配置 / 清除凭据 |
+
+> **防抖（debounce）**：Script Filter 内置 300ms 输入防抖
+> （Run Behaviour → Queue Delay = 0.3s，自定义），停止输入 300ms 后才请求翻译 API，
+> 避免连续打字时高频调用触发有道免费额度限制（errorCode 411）。
+> 修改方式：双击 Script Filter 对象 → Run Behaviour 按钮 → Queue Delay。
 
 ### 配置翻译选中文字的热键
 
@@ -143,7 +148,7 @@ yd_key=xxx yd_secret=yyy python3 workflow/yd.py "HTTPRequest"   # 带 key 调试
 |---|---|
 | `workflow/lib/__init__.py` 的 `__version__` | **唯一版本号**，改版本只改这一处 |
 | `workflow/info.plist` 的 `<version>` | Alfred 工作流列表显示的版本，`make build` 自动同步 |
-| git tag `v1.0.0` | 发布标记（相当于 npm 的 dist-tag） |
+| git tag `v1.1.0` | 发布标记（相当于 npm 的 dist-tag） |
 | `yd version` 命令 | Alfred 内随时查看版本 |
 
 ```bash
@@ -162,8 +167,11 @@ make build            # 自动把 __version__ 同步进 info.plist 并打包
 - **normalizer** 是核心差异化模块，规则逐条被 `tests/test_normalizer.py` 锁定，防止回归
 - 全大写缩写保留原样（实测 `NASA` 得到完整翻译，`API` 小写会误译为「蜜蜂」）
 - `from=auto` 交由有道自动识别源语言，比参考项目强制指定更鲁棒
-- 动作分发采用 **arg 前缀协议**（`speak:local:` / `speak:tts:` / 普通文本），
-  Script Filter 只有一条下游连接，Enter/Cmd/Alt 通过 JSON `mods` 携带不同前缀的 arg
+- **工作流执行流程在 Alfred 画布上完整可见**（与参考项目一致，四个动作均为独立节点，
+  带彩色注记标签）：`Hotkey → Script Filter`，然后
+  Enter → **复制到剪贴板 → 隐藏 Alfred**、Cmd → **本地发音**、
+  Alt → **在线发音**（Open URL，TTS 音频地址）、Shift → **打开网页**（Open URL，有道词典页）。
+  Script Filter 通过 JSON `mods` 把不同 arg 分发给对应节点，节点各司其职，无集中分发器
 - 发音优先使用 API 返回的 `speakUrl`（美音）/ `tSpeakUrl`（英音），准确且免去本地下载
 - 英文查询发音原词、中文查询发音英文译文；密钥通过 `variablesdontexport` 标记，
   导出/分享工作流时不带出

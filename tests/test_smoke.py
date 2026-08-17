@@ -85,8 +85,10 @@ class TestSmoke(unittest.TestCase):
         self.assertIn("youdao.com/w/API", first["quicklookurl"])  # 网页预览用原词
         self.assertIn("cmd", first["mods"])
         self.assertIn("alt", first["mods"])
-        self.assertIn("speak:local:", first["mods"]["cmd"]["arg"])
-        self.assertIn("speak:tts:", first["mods"]["alt"]["arg"])
+        self.assertIn("shift", first["mods"])
+        self.assertEqual(first["mods"]["cmd"]["arg"], "API")   # Cmd 发音词 = 原词
+        self.assertIn("https://", first["mods"]["alt"]["arg"])  # Alt 在线发音 = TTS URL
+        self.assertIn("youdao.com/w/API", first["mods"]["shift"]["arg"])  # Shift 打开网页
 
     def test_chinese_to_english(self):
         result, calls = run_yd(["你好世界"], env=ENV)
@@ -104,14 +106,14 @@ class TestSmoke(unittest.TestCase):
     def test_en_query_speaks_original_word(self):
         # 英文查询：Cmd 发音应读用户输入的原词
         result, _ = run_yd(["hello"], env=ENV)
-        self.assertIn("speak:local:hello", result["items"][0]["mods"]["cmd"]["arg"])
+        self.assertEqual(result["items"][0]["mods"]["cmd"]["arg"], "hello")
 
     def test_cn_query_speaks_translation(self):
         # 中文查询：Cmd 发音应读英文译文
         result, _ = run_yd(["你好世界"], env=ENV)
-        self.assertIn(
-            "speak:local:应用程序编程接口",
+        self.assertEqual(
             result["items"][0]["mods"]["cmd"]["arg"],
+            "应用程序编程接口",
         )
 
     def test_setkey_persists_to_data_dir(self):

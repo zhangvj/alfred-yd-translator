@@ -33,7 +33,7 @@
 			</dict>
 			<dict>
 				<key>destinationuid</key>
-				<string>A1B2C3D4-0003-4000-8000-000000000003</string>
+				<string>A1B2C3D4-0005-4000-8000-000000000005</string>
 				<key>modifiers</key>
 				<integer>1048576</integer>
 				<key>modifiersubtext</key>
@@ -43,13 +43,36 @@
 			</dict>
 			<dict>
 				<key>destinationuid</key>
-				<string>A1B2C3D4-0003-4000-8000-000000000003</string>
+				<string>A1B2C3D4-0006-4000-8000-000000000006</string>
 				<key>modifiers</key>
 				<integer>524288</integer>
 				<key>modifiersubtext</key>
 				<string></string>
 				<key>vitoclose</key>
 				<true/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>A1B2C3D4-0007-4000-8000-000000000007</string>
+				<key>modifiers</key>
+				<integer>131072</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<true/>
+			</dict>
+		</array>
+		<key>A1B2C3D4-0003-4000-8000-000000000003</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>A1B2C3D4-0004-4000-8000-000000000004</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
 			</dict>
 		</array>
 	</dict>
@@ -110,7 +133,7 @@
 				<key>keyword</key>
 				<string>yd</string>
 				<key>queuedelaycustom</key>
-				<integer>6</integer>
+				<integer>3</integer>
 				<key>queuedelayimmediatelyinitially</key>
 				<false/>
 				<key>queuedelaymode</key>
@@ -126,7 +149,7 @@
 				<key>scriptfile</key>
 				<string></string>
 				<key>subtext</key>
-				<string>Enter 复制 · Cmd 本地发音 · Alt 在线发音 · Shift 网页预览</string>
+				<string>Enter 复制 · Cmd 本地发音 · Alt 在线发音 · Shift 打开网页</string>
 				<key>title</key>
 				<string>有道翻译</string>
 				<key>type</key>
@@ -144,12 +167,44 @@
 		<dict>
 			<key>config</key>
 			<dict>
+				<key>autopaste</key>
+				<false/>
+				<key>clipboardtext</key>
+				<string>{query}</string>
+				<key>ignoredynamicplaceholders</key>
+				<false/>
+				<key>transient</key>
+				<false/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.output.clipboard</string>
+			<key>uid</key>
+			<string>A1B2C3D4-0003-4000-8000-000000000003</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>unstackview</key>
+				<false/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.utility.hidealfred</string>
+			<key>uid</key>
+			<string>A1B2C3D4-0004-4000-8000-000000000004</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
 				<key>concurrently</key>
 				<false/>
 				<key>escaping</key>
 				<integer>102</integer>
 				<key>script</key>
-				<string>/usr/bin/env python3 yd_action.py "$1"</string>
+				<string>/usr/bin/env python3 yd_speak.py "$1"</string>
 				<key>scriptargtype</key>
 				<integer>1</integer>
 				<key>scriptfile</key>
@@ -160,7 +215,33 @@
 			<key>type</key>
 			<string>alfred.workflow.action.script</string>
 			<key>uid</key>
-			<string>A1B2C3D4-0003-4000-8000-000000000003</string>
+			<string>A1B2C3D4-0005-4000-8000-000000000005</string>
+			<key>version</key>
+			<integer>2</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>url</key>
+				<string>{query}</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.openurl</string>
+			<key>uid</key>
+			<string>A1B2C3D4-0006-4000-8000-000000000006</string>
+			<key>version</key>
+			<integer>2</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>url</key>
+				<string>{query}</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.openurl</string>
+			<key>uid</key>
+			<string>A1B2C3D4-0007-4000-8000-000000000007</string>
 			<key>version</key>
 			<integer>2</integer>
 		</dict>
@@ -200,8 +281,9 @@
 ## 三、使用
 
 - `yd 关键词` 翻译，例如: `yd API`、`yd USER_NAME`、`yd well-known`、`yd 你好世界`
+- 停止输入 **300ms** 后自动请求翻译（内置防抖，减少 API 调用与频率限制）
 - Enter: 复制译文（窗口关闭）；Cmd+Enter: 本地发音；Alt+Enter: 有道在线发音（均保持窗口打开）
-- Shift+Enter: 有道网页预览；选中文字后按快捷键直接翻译
+- Shift+Enter: 在浏览器打开有道网页；选中文字后按快捷键直接翻译
 
 ## 四、配置快捷键（翻译选中文本）
 
@@ -227,16 +309,60 @@
 		<key>A1B2C3D4-0002-4000-8000-000000000002</key>
 		<dict>
 			<key>xpos</key>
-			<real>300</real>
+			<real>320</real>
 			<key>ypos</key>
 			<real>250</real>
 		</dict>
 		<key>A1B2C3D4-0003-4000-8000-000000000003</key>
 		<dict>
+			<key>colorindex</key>
+			<integer>2</integer>
+			<key>note</key>
+			<string>复制到剪贴板</string>
 			<key>xpos</key>
-			<real>560</real>
+			<real>620</real>
 			<key>ypos</key>
-			<real>250</real>
+			<real>60</real>
+		</dict>
+		<key>A1B2C3D4-0004-4000-8000-000000000004</key>
+		<dict>
+			<key>xpos</key>
+			<real>900</real>
+			<key>ypos</key>
+			<real>60</real>
+		</dict>
+		<key>A1B2C3D4-0005-4000-8000-000000000005</key>
+		<dict>
+			<key>colorindex</key>
+			<integer>5</integer>
+			<key>note</key>
+			<string>本地发音</string>
+			<key>xpos</key>
+			<real>620</real>
+			<key>ypos</key>
+			<real>190</real>
+		</dict>
+		<key>A1B2C3D4-0006-4000-8000-000000000006</key>
+		<dict>
+			<key>colorindex</key>
+			<integer>7</integer>
+			<key>note</key>
+			<string>在线发音</string>
+			<key>xpos</key>
+			<real>620</real>
+			<key>ypos</key>
+			<real>320</real>
+		</dict>
+		<key>A1B2C3D4-0007-4000-8000-000000000007</key>
+		<dict>
+			<key>colorindex</key>
+			<integer>4</integer>
+			<key>note</key>
+			<string>打开网页</string>
+			<key>xpos</key>
+			<real>620</real>
+			<key>ypos</key>
+			<real>450</real>
 		</dict>
 	</dict>
 	<key>userconfigurationconfig</key>
@@ -407,7 +533,7 @@
 		<string>yd_secret</string>
 	</array>
 	<key>version</key>
-	<string>1.0.0</string>
+	<string>1.1.0</string>
 	<key>webaddress</key>
 	<string></string>
 </dict>

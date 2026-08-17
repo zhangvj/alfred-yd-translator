@@ -2,14 +2,6 @@
 
 基于 [wensonsmith/YoudaoTranslator](https://github.com/wensonsmith/YoudaoTranslator) 的思路自定义实现，**重点修复参考项目对全大写、中划线、下划线单词翻译不准的问题**。
 
-参考项目的核心缺陷（源码 `translator.ts`）：
-
-```ts
-const word = query.replace(/([A-Z])/g, ' $1').toLowerCase();
-```
-
-它会在**每个大写字母前强行插入空格**，导致：`API` → `a p i`、`USER_NAME` → `u s e r _ n a m e`、`HTTPRequest` → `h t t p request`，翻译结果全是乱码。
-
 本插件内置**智能文本规范化（normalizer）**，正确处理：
 
 | 输入 | 规范化结果 | 实测翻译 |

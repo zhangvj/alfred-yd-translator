@@ -147,6 +147,10 @@ class TestSmoke(unittest.TestCase):
             self.assertIn("已清除", result["items"][0]["title"])
             self.assertFalse(os.path.exists(os.path.join(tmp, "config.json")))
 
+    def test_version_command(self):
+        result, _ = run_yd(["version"], env=ENV)
+        self.assertIn("yd-translator v", result["items"][0]["title"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,7 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from lib import __version__                                  # noqa: E402
 from lib.config import Config, config_path, clear_config, save_config  # noqa: E402
 from lib.detect import has_cjk, target_lang                 # noqa: E402
 from lib.normalizer import normalize               # noqa: E402
@@ -97,6 +98,13 @@ def handle_command(cmd, rest, cfg):
         print(output([i.result() for i in items]))
         return True
 
+    if cmd == "version":
+        print(output([error_item(
+            "yd-translator v{}".format(__version__),
+            "MIT License · 版本来源: workflow/lib/__init__.py",
+        )]))
+        return True
+
     if cmd == "reset":
         cleared = clear_config()
         print(output([error_item(
@@ -122,7 +130,7 @@ def main(argv=None):
         return
 
     cmd, _, rest = query.partition(" ")
-    if cmd in ("setkey", "setsecret", "config", "reset"):
+    if cmd in ("setkey", "setsecret", "config", "reset", "version"):
         handle_command(cmd, rest.strip(), cfg)
         return
 

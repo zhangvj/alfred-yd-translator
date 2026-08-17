@@ -143,6 +143,28 @@ python3 workflow/yd.py "API"        # 终端直接调试（未配置 key 时给�
 yd_key=xxx yd_secret=yyy python3 workflow/yd.py "HTTPRequest"   # 带 key 调试
 ```
 
+## 版本管理（无 package.json 的版本方案）
+
+本项目没有 `package.json`，采用 Python/git 惯用的**单一事实来源**方案：
+
+| 位置 | 作用 |
+|---|---|
+| `workflow/lib/__init__.py` 的 `__version__` | **唯一版本号**，改版本只改这一处 |
+| `workflow/info.plist` 的 `<version>` | Alfred 工作流列表显示的版本，`make build` 自动同步 |
+| git tag `v1.0.0` | 发布标记（相当于 npm 的 dist-tag） |
+| `yd version` 命令 | Alfred 内随时查看版本 |
+
+```bash
+make version          # 查看当前版本
+make build            # 自动把 __version__ 同步进 info.plist 并打包
+
+# 发布一个新版本
+# 1. 修改 workflow/lib/__init__.py 的 __version__（如 1.1.0）
+# 2. make build && make test
+# 3. git add -A && git commit -m "release: v1.1.0"
+# 4. git tag v1.1.0 && git push origin master v1.1.0
+```
+
 ## 设计说明
 
 - **normalizer** 是核心差异化模块，规则逐条被 `tests/test_normalizer.py` 锁定，防止回归

@@ -62,9 +62,16 @@ class Item:
         return self._data
 
 
-def output(items):
-    """输出 Alfred Script Filter JSON 字符串。"""
-    return json.dumps({"items": items}, ensure_ascii=False)
+def output(items, rerun=None):
+    """输出 Alfred Script Filter JSON 字符串。
+
+    rerun 为秒数时，Alfred 会在该时间后以当前输入自动重跑本脚本
+    （用户继续打字则被新输入取代），用于"等待输入完成"的延迟翻译。
+    """
+    data = {"items": items}
+    if rerun:
+        data["rerun"] = round(float(rerun), 2)
+    return json.dumps(data, ensure_ascii=False)
 
 
 def error_item(title, subtitle):

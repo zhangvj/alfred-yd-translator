@@ -14,11 +14,32 @@
     yd_voice    在线发音音色: en(美音 speakUrl) / uk(英音 tSpeakUrl)，默认 en
     yd_sign     签名方式: auto(默认, v3 失败自动回退 v1) / v3 / v1
 
+    —— 防刷量守卫（guard.py），默认值即安全值 ——
+    yd_pinyin_guard    拼音组词中间态检测开关: 1(默认) / 0
+    yd_min_len         非 CJK 查询的最短长度，默认 2（0 关闭）
+    yd_min_interval    两次真实 API 调用最小间隔（秒），默认 1.0
+    yd_rate_window     限速滑动窗口长度（秒），默认 60
+    yd_max_per_window  窗口内最大 API 调用次数，默认 30
+    yd_cache_ttl       翻译结果缓存有效期（秒），默认 600
+    yd_cooldown        收到 411 后的冷却基准秒数（指数退避 60→120→…→960）
+    yd_defer_delay     疑似"输入中"时延后翻译的秒数（Alfred rerun），默认 1.0
+    yd_chain_window    逐词上屏链式合并的判定窗口（秒），默认 3.5
+
     alfred_workflow_data   Alfred 注入的工作流数据目录（跨更新保留）
     YD_DATA_DIR            命令行调试/测试用覆盖目录（无 Alfred 时兜底）
 """
 import json
 import os
+
+from .guard import (
+    DEFAULT_CHAIN_WINDOW,
+    DEFAULT_COOLDOWN,
+    DEFAULT_DEFER_DELAY,
+    DEFAULT_MAX_PER_WINDOW,
+    DEFAULT_MIN_INTERVAL,
+    DEFAULT_TTL,
+    DEFAULT_WINDOW,
+)
 
 CONFIG_FILENAME = "config.json"
 
@@ -86,6 +107,17 @@ def _pick(env, saved, name, default=""):
     return value or str(default)
 
 
+def _pick_num(env, saved, name, default, minimum=None):
+    """数值型配置：解析失败回退默认值，可设下限。统一返回 float。"""
+    try:
+        value = float(_pick(env, saved, name, str(default)))
+    except (TypeError, ValueError):
+        value = float(default)
+    if minimum is not None:
+        value = max(value, minimum)
+    return value
+
+
 class Config:
     """有道翻译工作流配置。"""
 
@@ -98,6 +130,25 @@ class Config:
         self.cn_to = _pick(env, saved, "yd_cn_to", "en")
         self.voice = _pick(env, saved, "yd_voice", "en")
         self.sign = _pick(env, saved, "yd_sign", "auto")
+        # 防刷量守卫参数（见 guard.py / README）
+        self.pinyin_guard = _pick(
+            env, saved, "yd_pinyin_guard", "1"
+        ).lower() not in ("0", "false", "off", "no")
+        self.min_len = _pick_num(env, saved, "yd_min_len", 2, minimum=0)
+        self.min_interval = _pick_num(
+            env, saved, "yd_min_interval", DEFAULT_MIN_INTERVAL, minimum=0)
+        self.rate_window = _pick_num(
+            env, saved, "yd_rate_window", DEFAULT_WINDOW, minimum=1)
+        self.max_per_window = _pick_num(
+            env, saved, "yd_max_per_window", DEFAULT_MAX_PER_WINDOW, minimum=0)
+        self.cache_ttl = _pick_num(
+            env, saved, "yd_cache_ttl", DEFAULT_TTL, minimum=0)
+        self.cooldown = _pick_num(
+            env, saved, "yd_cooldown", DEFAULT_COOLDOWN, minimum=0)
+        self.defer_delay = _pick_num(
+            env, saved, "yd_defer_delay", DEFAULT_DEFER_DELAY, minimum=0)
+        self.chain_window = _pick_num(
+            env, saved, "yd_chain_window", DEFAULT_CHAIN_WINDOW, minimum=0)
         self._saved = saved
 
     @property

@@ -7,17 +7,25 @@
 """
 import os
 import sys
+import time
 import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib import __version__                                  # noqa: E402
-from lib.config import Config, config_path, clear_config, save_config  # noqa: E402
-from lib.detect import has_cjk, target_lang                 # noqa: E402
-from lib.normalizer import normalize               # noqa: E402
-from lib.output import Item, error_item, output    # noqa: E402
-from lib.tts import pick_speak_url                 # noqa: E402
+from lib.config import (                                     # noqa: E402
+    Config, config_path, clear_config, get_data_dir, save_config,
+)
+from lib.detect import has_cjk, target_lang                  # noqa: E402
+from lib.guard import RateLimiter, ResponseCache, cache_key  # noqa: E402
+from lib.normalizer import normalize                         # noqa: E402
+from lib.output import Item, error_item, output              # noqa: E402
+from lib.pinyin import is_composition, is_pinyin_suspect      # noqa: E402
+from lib.tts import pick_speak_url                           # noqa: E402
 from lib.youdao import YoudaoClient, YoudaoError, extract_rows  # noqa: E402
+
+# 限速等待超过该秒数时不再 sleep，直接提示用户稍候（避免卡住 Alfred 界面）
+MAX_SLEEP = 2.0
 
 
 def _mask(value):
@@ -95,6 +103,14 @@ def handle_command(cmd, rest, cfg):
                    .subtitle("目标语言（可去工作流 [X] 面板修改）").valid(False),
             Item().title("yd_voice: {} / yd_sign: {}".format(cfg.voice, cfg.sign))
                    .subtitle("发音音色 / 签名方式").valid(False),
+            Item().title(
+                "防刷量: 组词检测{} · 链式合并 {:.1f}s · 限速 {:.1f}s".format(
+                    "开" if cfg.pinyin_guard else "关",
+                    cfg.chain_window, cfg.min_interval,
+                ))
+                   .subtitle("缓存 {:.0f}s · 窗口上限 {}/{}s · 411冷却基准 {}s · 最短 {} 字符".format(
+                       cfg.cache_ttl, int(cfg.max_per_window), int(cfg.rate_window),
+                       int(cfg.cooldown), int(cfg.min_len))).valid(False),
             Item().title("数据目录: {}".format(config_path()))
                    .subtitle("更新工作流后 key/secret 依然在此保留").valid(False),
         ]
@@ -144,19 +160,107 @@ def main(argv=None):
         )]))
         return
 
+    # 逃逸口：末尾 "." / "。" 表示"确要立即翻译"，跳过输入演进/疑似组词的延迟判定
+    core = query.rstrip(".。")
+    force = core != query
+    if force:
+        query = core.strip()
+
     norm = normalize(query)
     if not norm:
         print(output([error_item("无法翻译该内容", "未识别到可翻译的文字")]))
         return
 
     to = target_lang(norm, to=cfg.to, cn_to=cfg.cn_to)
+
+    # ---- 防刷量守卫（详见 lib/guard.py / lib/pinyin.py）----
+    data_dir = get_data_dir()
+    cache = ResponseCache(data_dir, ttl=cfg.cache_ttl)
+    limiter = RateLimiter(
+        data_dir,
+        min_interval=cfg.min_interval,
+        window=cfg.rate_window,
+        max_per_window=cfg.max_per_window,
+    )
+    key = cache_key(norm, to)
+    now = time.time()
+
+    # 1) 411 指数冷却期：完全不调用 API，有缓存则附带缓存结果
+    remaining = limiter.cooldown_remaining(now)
+    if remaining > 0:
+        items = [error_item(
+            "⛔ 访问频率受限中",
+            "约 {} 秒后自动恢复，期间不再调用 API".format(int(remaining) + 1),
+        )]
+        cached = cache.get(key, now)
+        if cached is not None:
+            items += build_items(cfg, query, norm, cached)
+        print(output(items))
+        return
+
+    # 2) 输入演进 / 疑似组词 → 延后翻译（Alfred rerun 自动重跑；继续输入则
+    #    被新查询取代，中间态零调用；停止输入 1 秒后回访翻译）
+    #    - 链式合并：与上一查询呈前缀扩展/截断（你→你在→你在干什么、退格删字）
+    #    - 疑似拼音组词：裸拼音 da/nihao/nih、混合态 你好shijie
+    stable = limiter.stable_visit(query, now, cfg.defer_delay)
+    suspect = cfg.pinyin_guard and (is_composition(query) or is_pinyin_suspect(query))
+    if not stable and not force and (
+            limiter.chain_related(query, now, cfg.chain_window) or suspect):
+        limiter.note_query(query, now)
+        print(output([error_item(
+            "⌨️ 正在等待输入完成···",
+            "停止输入 {:.1g} 秒后自动翻译；末尾加 . 可立即翻译".format(cfg.defer_delay),
+        )], rerun=cfg.defer_delay))
+        return
+    limiter.note_query(query, now)
+
+    # 3) 缓存命中：直接重建结果，零调用
+    cached = cache.get(key, now)
+    if cached is not None:
+        print(output(build_items(cfg, query, norm, cached)))
+        return
+
+    # 4) 最短长度：单个 ASCII 字符查询基本无意义，纯耗免费额度
+    if cfg.min_len > 0 and len(norm) < cfg.min_len and not has_cjk(norm):
+        print(output([error_item(
+            "再多输入几个字符",
+            "过短查询也消耗额度，至少 {} 个字符（yd_min_len 可调）".format(int(cfg.min_len)),
+        )]))
+        return
+
+    # 5) 限速：距上次调用过近则补足间隔；窗口内超限则放弃本次请求
+    action, wait = limiter.wait_time()
+    if action == RateLimiter.BLOCKED or (action == RateLimiter.WAIT and wait > MAX_SLEEP):
+        print(output([error_item(
+            "🚦 请求太频繁",
+            "短时调用已达上限，约 {} 秒后再试".format(int(wait) + 1 if wait > 0 else int(cfg.rate_window)),
+        )]))
+        return
+    if action == RateLimiter.WAIT:
+        time.sleep(wait)
+
     client = YoudaoClient(cfg.key, cfg.secret, sign_mode=cfg.sign)
+    limiter.record()  # 记录本次真实调用（发起请求时）
     try:
         data = client.translate(norm, to)
     except YoudaoError as exc:
-        print(output([error_item("👻 翻译出错啦", exc.message)]))
+        if str(exc.code) == "411":
+            seconds = limiter.set_cooldown(cfg.cooldown)
+            print(output([error_item(
+                "👻 访问频率受限（411）",
+                "已进入 {} 秒冷却期（连续 411 会指数延长），期间不再调用 API".format(int(seconds)),
+            )]))
+        else:
+            print(output([error_item("👻 翻译出错啦", exc.message)]))
         return
 
+    limiter.note_success()
+    # 签名回退记忆：auto 模式下 v3 被拒(202)、v1 成功 → 持久化有效签名方式，
+    # 此后每次查询单请求直达（省掉注定失败的 v3 请求，请求量减半）
+    if cfg.sign == "auto" and client.effective_sign == "v1":
+        save_config({"yd_sign": "v1"})
+
+    cache.put(key, data)
     print(output(build_items(cfg, query, norm, data)))
 
 

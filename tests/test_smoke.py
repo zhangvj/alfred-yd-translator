@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -38,21 +39,42 @@ ENV = {
 }
 
 
-def run_yd(argv, env=None, response=FAKE_RESPONSE):
-    """以给定 argv 运行 yd.main，mock translate，返回 (exit_json, translate_call)。"""
+def run_yd(argv, env=None, response=FAKE_RESPONSE, translate_side_effect=None,
+           translate_impl=None):
+    """以给定 argv 运行 yd.main，mock translate，返回 (exit_json, translate_call)。
+
+    - 默认注入独立临时 YD_DATA_DIR，避免污染真实数据目录、用例间互不影响；
+      传入 env["YD_DATA_DIR"] 可让多次调用共享状态（测缓存/限速/冷却/链式）。
+    - time.sleep 被打桩，限速等待不会真正阻塞。
+    - translate_side_effect(q, to) 可注入异常（如 411）等自定义行为。
+    - translate_impl(client_self, q, to, from_lang) 完全替换 translate 实现
+      （如模拟签名回退：设置 client.effective_sign）。
+    """
     calls = {}
 
     def fake_translate(client_self, q, to, from_lang="auto"):
         calls["q"] = q
         calls["to"] = to
+        calls["n"] = calls.get("n", 0) + 1
+        if translate_impl is not None:
+            return translate_impl(client_self, q, to, from_lang)
+        if translate_side_effect is not None:
+            return translate_side_effect(q, to)
         # 真实 API 会在响应中回显 query
         return dict(response, query=q)
 
+    data_dir = tempfile.mkdtemp(prefix="yd-test-")
+    env = dict(env or {})
+    env.setdefault("YD_DATA_DIR", data_dir)
     buf = io.StringIO()
-    with mock.patch.dict(os.environ, env or {}, clear=False):
-        with mock.patch.object(yd.YoudaoClient, "translate", new=fake_translate):
-            with redirect_stdout(buf):
-                yd.main(argv)
+    try:
+        with mock.patch.dict(os.environ, env, clear=False):
+            with mock.patch.object(yd.YoudaoClient, "translate", new=fake_translate):
+                with mock.patch.object(yd.time, "sleep"):
+                    with redirect_stdout(buf):
+                        yd.main(argv)
+    finally:
+        shutil.rmtree(data_dir, ignore_errors=True)
     return json.loads(buf.getvalue()), calls
 
 
@@ -152,6 +174,174 @@ class TestSmoke(unittest.TestCase):
     def test_version_command(self):
         result, _ = run_yd(["version"], env=ENV)
         self.assertIn("yd-translator v", result["items"][0]["title"])
+
+
+class TestGuardChain(unittest.TestCase):
+    """防刷量守卫链：输入演进延迟 / 疑似组词 / 缓存 / 限速 / 411 指数冷却。"""
+
+    def test_pinyin_composition_defers(self):
+        # 已上屏+组词混合态：零调用，输出"等待输入完成"并带 rerun
+        result, calls = run_yd(["你好shijie"], env=ENV)
+        self.assertEqual(calls, {})
+        self.assertFalse(result["items"][0]["valid"])
+        self.assertIn("等待输入", result["items"][0]["title"])
+        self.assertIn("rerun", result)
+
+    def test_pure_pinyin_suspect_defers(self):
+        result, calls = run_yd(["nihao"], env=ENV)
+        self.assertEqual(calls, {})
+        self.assertIn("rerun", result)
+
+    def test_single_syllable_suspect_defers(self):
+        # v1.2.0 会放行单音节（泄漏），v1.3.0 软判定延后，零调用
+        result, calls = run_yd(["da"], env=ENV)
+        self.assertEqual(calls, {})
+        self.assertIn("rerun", result)
+
+    def test_unparseable_prefix_suspect_defers(self):
+        result, calls = run_yd(["nih"], env=ENV)   # ni+h…，补全可成拼音
+        self.assertEqual(calls, {})
+        self.assertIn("rerun", result)
+
+    def test_english_words_not_suspect(self):
+        # 非拼音形态的英文查询不受影响（误伤代价仅存在于拼音形词 +1s 延迟）
+        for q in ("hello", "apple", "xyz", "abc"):
+            _, calls = run_yd([q], env=ENV)
+            self.assertEqual(calls.get("n"), 1, q)
+
+    def test_suspect_stable_rerun_translates(self):
+        # 疑似组词 → 延后；回访（同查询、已达延迟）→ 正常翻译
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(ENV, YD_DATA_DIR=tmp, yd_defer_delay="0")
+            r1, c1 = run_yd(["nihao"], env=env)
+            self.assertEqual(c1, {})
+            r2, c2 = run_yd(["nihao"], env=env)
+            self.assertEqual(c2.get("n"), 1)
+            self.assertNotIn("rerun", r2)
+
+    def test_force_dot_bypasses_defer(self):
+        # 末尾 "." 强制立即翻译（句点会被剥掉）
+        result, calls = run_yd(["nihao."], env=ENV)
+        self.assertEqual(calls.get("n"), 1)
+        self.assertEqual(calls["q"], "nihao")
+        self.assertNotIn("rerun", result)
+
+    def test_chained_phrase_commits_merge(self):
+        # 逐词上屏链：你 → 你在（前缀扩展，3.5s 内）→ 第二次零调用
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(ENV, YD_DATA_DIR=tmp)
+            r1, c1 = run_yd(["你"], env=env)
+            self.assertEqual(c1.get("n"), 1)        # 首查询直接翻译
+            r2, c2 = run_yd(["你在"], env=env)
+            self.assertEqual(c2, {})                # 演进中间态 → 延后
+            self.assertIn("rerun", r2)
+            _, c3 = run_yd(["你在干什么"], env=env)  # 继续演进 → 仍零调用
+            self.assertEqual(c3, {})
+
+    def test_backspace_edit_chains(self):
+        # 退格编辑：...damk a → ...damk（截断）也属于演进中间态
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(ENV, YD_DATA_DIR=tmp)
+            run_yd(["what do you think damk a"], env=env)
+            _, calls = run_yd(["what do you think damk"], env=env)
+            self.assertEqual(calls, {})
+
+    def test_pinyin_guard_can_be_disabled(self):
+        result, calls = run_yd(["nihao"], env=dict(ENV, yd_pinyin_guard="0"))
+        self.assertEqual(calls.get("n"), 1)   # 关闭后照常翻译
+        self.assertNotEqual(result["items"][0].get("valid"), False)
+
+    def test_mixed_english_query_still_translated(self):
+        # 非拼音的混合查询不受组词检测影响
+        result, calls = run_yd(["苹果iphone"], env=ENV)
+        self.assertEqual(calls.get("n"), 1)
+        self.assertNotEqual(result["items"][0].get("valid"), False)
+
+    def test_repeat_query_served_from_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(ENV, YD_DATA_DIR=tmp)
+            r1, c1 = run_yd(["API"], env=env)
+            self.assertEqual(c1.get("n"), 1)
+            r2, c2 = run_yd(["API"], env=env)   # 同数据目录二次查询
+            self.assertEqual(c2, {})            # 缓存命中，零调用
+            self.assertEqual(r2["items"][0]["title"], r1["items"][0]["title"])
+            self.assertEqual(r2["items"][0]["arg"], r1["items"][0]["arg"])
+
+    def test_different_target_not_shared(self):
+        # 同一查询不同目标语言不能共用缓存（中↔英结果不同）
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(ENV, YD_DATA_DIR=tmp, yd_cn_to="fr")
+            run_yd(["你好世界"], env=env)
+            _, calls = run_yd(["你好世界"], env=dict(env, yd_cn_to="en"))
+            self.assertEqual(calls.get("n"), 1)
+
+    def test_rate_window_blocks_burst(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(ENV, YD_DATA_DIR=tmp,
+                       yd_max_per_window="2", yd_min_interval="0")
+            run_yd(["API"], env=env)
+            run_yd(["hello"], env=env)
+            result, calls = run_yd(["world"], env=env)
+            self.assertEqual(calls, {})                       # 第 3 次被拒绝
+            self.assertFalse(result["items"][0]["valid"])
+            self.assertIn("频繁", result["items"][0]["title"])
+
+    def test_411_sets_cooldown_then_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(ENV, YD_DATA_DIR=tmp)
+
+            def boom(q, to):
+                raise yd.YoudaoError("411", "访问频率受限")
+
+            r1, c1 = run_yd(["你好世界"], env=env, translate_side_effect=boom)
+            self.assertEqual(c1.get("n"), 1)
+            self.assertIn("411", r1["items"][0]["title"])
+
+            # 冷却期内：零调用，提示自动恢复
+            r2, c2 = run_yd(["你好世界"], env=env)
+            self.assertEqual(c2, {})
+            self.assertFalse(r2["items"][0]["valid"])
+            self.assertIn("恢复", r2["items"][0].get("subtitle", ""))
+
+    def test_single_letter_hint(self):
+        result, calls = run_yd(["a"], env=ENV)
+        self.assertEqual(calls, {})
+        self.assertIn("字符", result["items"][0]["title"])
+
+    def test_sign_fallback_memory_persisted(self):
+        # auto 模式 v3 被拒(202)、v1 成功 → config.json 记住 yd_sign=v1，
+        # 此后每次查询单请求直达（请求量减半）
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(ENV, YD_DATA_DIR=tmp)
+
+            def impl(client_self, q, to, from_lang="auto"):
+                client_self.effective_sign = "v1"
+                return dict(FAKE_RESPONSE, query=q)
+
+            run_yd(["API"], env=env, translate_impl=impl)
+            with open(os.path.join(tmp, "config.json")) as f:
+                saved = json.load(f)
+            self.assertEqual(saved.get("yd_sign"), "v1")
+
+    def test_sign_memory_skipped_when_v3_ok(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(ENV, YD_DATA_DIR=tmp)
+
+            def impl(client_self, q, to, from_lang="auto"):
+                client_self.effective_sign = "v3"
+                return dict(FAKE_RESPONSE, query=q)
+
+            run_yd(["API"], env=env, translate_impl=impl)
+            self.assertFalse(os.path.exists(os.path.join(tmp, "config.json")))
+
+    def test_config_shows_guard_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result, _ = run_yd(["config"], env=dict(ENV, YD_DATA_DIR=tmp))
+            text = " | ".join(
+                it["title"] + " " + it.get("subtitle", "") for it in result["items"]
+            )
+            self.assertIn("组词检测", text)
+            self.assertIn("限速", text)
 
 
 if __name__ == "__main__":

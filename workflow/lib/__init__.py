@@ -6,4 +6,4 @@
 #      （Alfred 的工作流列表会显示此版本）；
 #   3. 发布时用 git tag v<版本号> 标记（如 v1.0.0）；
 #   4. 在 Alfred 中输入 `yd version` 可随时查看。
-__version__ = "1.1.0"
+__version__ = "1.3.0"

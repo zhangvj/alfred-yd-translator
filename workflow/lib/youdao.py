@@ -97,7 +97,9 @@ class YoudaoClient:
 
     sign_mode:
         auto - 默认。先按 v3 签名请求，遇 202（签名失败）自动回退 v1 重试；
-              兼容新旧两种有道应用。
+              兼容新旧两种有道应用。实际生效的签名方式记录在
+              self.effective_sign，调用方可据此持久化（签名回退记忆），
+              避免此后每次查询都多发一个注定失败的 v3 请求（请求量翻倍）。
         v3   - 仅 v3 签名（新应用）。
         v1   - 仅 v1 签名（早期创建的应用，可避免 auto 模式多余的失败重试）。
     """
@@ -107,15 +109,18 @@ class YoudaoClient:
         self.secret = secret
         self.timeout = timeout
         self.sign_mode = sign_mode
+        self.effective_sign = None   # 本次实际成功的签名方式："v3" / "v1"
 
     def translate(self, q, to, from_lang="auto"):
         """调用 API 并返回解析后的结果字典（原始 JSON）。"""
         try:
             data = self._request(q, to, from_lang, sign_mode="v1" if self.sign_mode == "v1" else "v3")
+            self.effective_sign = "v1" if self.sign_mode == "v1" else "v3"
         except YoudaoError as exc:
             if self.sign_mode == "auto" and str(exc.code) == "202":
                 # v3 签名不被该应用接受（旧版应用），回退 v1 重试
                 data = self._request(q, to, from_lang, sign_mode="v1")
+                self.effective_sign = "v1"
             else:
                 raise
         return data

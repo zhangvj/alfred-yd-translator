@@ -13,6 +13,8 @@ from workflow.lib.youdao import (
     build_sign_v3,
     extract_rows,
     input_text,
+    is_passthrough,
+    response_lang_pair,
 )
 
 FAKE_RESPONSE = {
@@ -172,6 +174,45 @@ class TestClient(unittest.TestCase):
             with self.assertRaises(YoudaoError) as ctx:
                 YoudaoClient("k", "s", sign_mode="v3").translate("api", "zh-CHS")
         self.assertIn("网络", ctx.exception.message)
+
+
+class TestPassthrough(unittest.TestCase):
+    """回显检测：源语言 == 目标语言时 API 原样返回，等于没翻译。"""
+
+    def test_same_pair_is_passthrough(self):
+        self.assertTrue(is_passthrough({"l": "en2en", "query": "hi", "translation": ["hi"]}))
+        self.assertTrue(is_passthrough({"l": "zh-CHS2zh-CHS"}))
+
+    def test_different_pair_is_not_passthrough(self):
+        self.assertFalse(is_passthrough({"l": "en2zh-CHS", "query": "hi", "translation": ["你好"]}))
+
+    def test_language_alias_supported(self):
+        # 部分响应/测试 fixture 用 language 而非 l
+        self.assertTrue(is_passthrough({"language": "en2en"}))
+        self.assertFalse(is_passthrough({"language": "en2zh-CHS"}))
+
+    def test_pair_case_insensitive(self):
+        self.assertTrue(is_passthrough({"l": "EN2EN"}))
+
+    def test_missing_pair_falls_back_to_text_compare(self):
+        self.assertTrue(is_passthrough({"query": "hello world", "translation": ["hello world"]}))
+        self.assertFalse(is_passthrough({"query": "hello", "translation": ["你好"]}))
+
+    def test_identical_text_but_explicit_other_pair_is_not_passthrough(self):
+        # 「OK → OK」这类同形短词/URL/哈希：l 明示异语种，不该误触重试
+        data = {"l": "en2zh-CHS", "query": "OK", "translation": ["OK"]}
+        self.assertFalse(is_passthrough(data))
+
+    def test_empty_or_missing_translation(self):
+        self.assertFalse(is_passthrough({}))
+        self.assertFalse(is_passthrough({"query": "hi", "translation": []}))
+        self.assertFalse(is_passthrough(None))
+
+    def test_response_lang_pair_parsing(self):
+        self.assertEqual(response_lang_pair({"l": "en2zh-CHS"}), ("en", "zh-CHS"))
+        self.assertEqual(response_lang_pair({"l": "en2en"}), ("en", "en"))
+        self.assertEqual(response_lang_pair({"l": "garbage"}), ("", ""))
+        self.assertEqual(response_lang_pair({}), ("", ""))
 
 
 if __name__ == "__main__":

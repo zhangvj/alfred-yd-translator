@@ -56,6 +56,8 @@ def run_yd(argv, env=None, response=FAKE_RESPONSE, translate_side_effect=None,
         calls["q"] = q
         calls["to"] = to
         calls["n"] = calls.get("n", 0) + 1
+        calls.setdefault("qs", []).append(q)       # 调用历史（每次真实请求的 q）
+        calls.setdefault("tos", []).append(to)
         if translate_impl is not None:
             return translate_impl(client_self, q, to, from_lang)
         if translate_side_effect is not None:
@@ -342,6 +344,135 @@ class TestGuardChain(unittest.TestCase):
             )
             self.assertIn("组词检测", text)
             self.assertIn("限速", text)
+
+
+class TestPassthroughFallback(unittest.TestCase):
+    """回显兜底：源语言==目标语言（en2en）时自动换目标语言重试，仍回显则提示。"""
+
+    # 真实触发过问题的文本：英文错误日志里嵌了一个中文词
+    MIXED_LOG = (
+        "CC Switch local proxy failed while handling Codex endpoint /responses. "
+        "Provider: 公司; model: ccs-qianwenai/deepseek-v4.1-flash-1017; "
+        "upstream_status: HTTP 400; cause: Invalid 'call_id': call_id is required "
+        "for function_call_output"
+    )
+
+    def _passthrough_response(self, q):
+        return {"errorCode": "0", "query": q, "l": "en2en", "translation": [q]}
+
+    def test_mixed_log_text_targets_chinese(self):
+        # 快路径：长文本拉丁主导 → 直接翻译成中文（不再发 en→en 的白费请求）
+        _, calls = run_yd([self.MIXED_LOG], env=ENV)
+        self.assertEqual(calls["to"], "zh-CHS")
+
+    def test_mixed_log_text_masks_embedded_chinese(self):
+        # 中文目标下已有中文片段被打码后送翻译，模型保留标记 → 还原为原文
+        def impl(client_self, q, to, from_lang="auto"):
+            translation = q.replace("Provider: [[C0]]", "提供方：[[C0]]")
+            return {"errorCode": "0", "query": q, "l": "en2zh-CHS",
+                    "translation": [translation]}
+
+        result, calls = run_yd([self.MIXED_LOG], env=ENV, translate_impl=impl)
+        self.assertEqual(calls["n"], 1)                          # 仍只调用一次
+        self.assertEqual(calls["to"], "zh-CHS")
+        self.assertIn("[[C0]]", calls["q"])                      # 中文片段被保护
+        self.assertNotIn("公司", calls["q"])
+        title = result["items"][0]["title"]
+        self.assertIn("公司", title)                             # 原样保留
+        self.assertNotIn("[[C", title)                           # 不泄漏占位符
+        self.assertNotIn("五星", title)
+
+    def test_marker_loss_degrades_to_plain_request(self):
+        # 模型吞掉占位符（实测未发生）→ 退回未掩码请求，保证内容完整
+        result, calls = run_yd([self.MIXED_LOG], env=ENV)
+        self.assertEqual(calls["n"], 2)
+        self.assertIn("[[C0]]", calls["qs"][0])                  # 首次带保护
+        self.assertNotIn("[[C", calls["qs"][1])                  # 降级用未掩码原文
+        self.assertEqual(result["items"][0]["title"], "应用程序编程接口")
+        self.assertNotIn("[[C", result["items"][0]["title"])
+
+    def test_short_mixed_text_not_masked(self):
+        # 短混排（目标 en）不做中文保护：公司 应照常参与翻译
+        def impl(client_self, q, to, from_lang="auto"):
+            return {"errorCode": "0", "query": q, "l": "zh-CHS2en",
+                    "translation": [q.replace("公司", "Company")]}
+
+        result, calls = run_yd(["Provider: 公司; model: x"], env=ENV, translate_impl=impl)
+        self.assertNotIn("[[C", calls["q"])
+        self.assertIn("Company", result["items"][0]["title"])
+
+    def test_non_chinese_target_not_masked(self):
+        # 目标非中文（如 ja）：中文片段照常参与翻译，不掩码
+        env = dict(ENV, yd_to="ja")
+        _, calls = run_yd([self.MIXED_LOG], env=env)
+        self.assertNotIn("[[C", calls["q"])
+
+    def test_passthrough_retries_alternate_target(self):
+        # 首次目标语言回显 → 自动换另一目标语言重试并采用其结果
+        def impl(client_self, q, to, from_lang="auto"):
+            if to == "zh-CHS":
+                return self._passthrough_response(q)
+            return dict(FAKE_RESPONSE, query=q)
+
+        result, calls = run_yd(["hello there my friend"], env=ENV, translate_impl=impl)
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(calls["to"], "en")                      # 末次为备选目标
+        self.assertEqual(result["items"][0]["title"], "应用程序编程接口")
+
+    def test_passthrough_retry_result_is_cached(self):
+        def impl(client_self, q, to, from_lang="auto"):
+            if to == "zh-CHS":
+                return self._passthrough_response(q)
+            return dict(FAKE_RESPONSE, query=q)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(ENV, YD_DATA_DIR=tmp)
+            run_yd(["hello there my friend"], env=env, translate_impl=impl)
+            result, calls = run_yd(["hello there my friend"], env=env, translate_impl=impl)
+            self.assertEqual(calls, {})                          # 二次零调用
+            self.assertEqual(result["items"][0]["title"], "应用程序编程接口")
+
+    def test_still_passthrough_shows_actionable_hint(self):
+        def impl(client_self, q, to, from_lang="auto"):
+            return self._passthrough_response(q)
+
+        result, calls = run_yd(["hello there my friend"], env=ENV, translate_impl=impl)
+        self.assertEqual(calls["n"], 2)                          # 只重试一次，不死循环
+        item = result["items"][0]
+        self.assertFalse(item["valid"])
+        self.assertIn("未能翻译", item["title"])
+        self.assertIn("en → en", item["subtitle"])
+
+    def test_cached_passthrough_hints_without_api_call(self):
+        def impl(client_self, q, to, from_lang="auto"):
+            return self._passthrough_response(q)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(ENV, YD_DATA_DIR=tmp)
+            run_yd(["hello there my friend"], env=env, translate_impl=impl)
+            result, calls = run_yd(["hello there my friend"], env=env, translate_impl=impl)
+            self.assertEqual(calls, {})                          # 命中缓存，零调用
+            self.assertFalse(result["items"][0]["valid"])
+            self.assertIn("未能翻译", result["items"][0]["title"])
+
+    def test_no_alternate_target_skips_retry(self):
+        # yd_to == yd_cn_to → 无备选目标，只调用一次并给提示
+        env = dict(ENV, yd_to="en", yd_cn_to="en")
+
+        def impl(client_self, q, to, from_lang="auto"):
+            return self._passthrough_response(q)
+
+        result, calls = run_yd(["hello there"], env=env, translate_impl=impl)
+        self.assertEqual(calls["n"], 1)
+        self.assertFalse(result["items"][0]["valid"])
+        self.assertIn("未能翻译", result["items"][0]["title"])
+
+    def test_empty_result_hint(self):
+        # 响应既无译文也无释义 → 不再输出空 items 列表
+        result, _ = run_yd(["hello world"], env=ENV,
+                           response={"errorCode": "0", "query": "hello world"})
+        self.assertEqual(len(result["items"]), 1)
+        self.assertIn("未获取到翻译结果", result["items"][0]["title"])
 
 
 if __name__ == "__main__":

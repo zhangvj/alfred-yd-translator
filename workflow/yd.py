@@ -21,8 +21,13 @@ from lib.guard import RateLimiter, ResponseCache, cache_key  # noqa: E402
 from lib.normalizer import normalize                         # noqa: E402
 from lib.output import Item, error_item, output              # noqa: E402
 from lib.pinyin import is_composition, is_pinyin_suspect      # noqa: E402
-from lib.tts import pick_speak_url                           # noqa: E402
-from lib.youdao import YoudaoClient, YoudaoError, extract_rows  # noqa: E402
+from lib.protect import (                                    # noqa: E402
+    mask_han, placeholders_intact, should_mask, unmask_text,
+)
+from lib.tts import fallback_speak_url, pick_speak_url        # noqa: E402
+from lib.youdao import (                                    # noqa: E402
+    YoudaoClient, YoudaoError, extract_rows, is_passthrough, response_lang_pair,
+)
 
 # 限速等待超过该秒数时不再 sleep，直接提示用户稍候（避免卡住 Alfred 界面）
 MAX_SLEEP = 2.0
@@ -73,6 +78,117 @@ def build_items(cfg, orig, norm, data):
         )
         items.append(item.result())
     return items
+
+
+def passthrough_item(data):
+    """回显响应（源语言 == 目标语言）的可操作提示。"""
+    src, dst = response_lang_pair(data)
+    pair = "{} → {}".format(src, dst) if src and dst else "同一语种"
+    return error_item(
+        "⚠️ 未能翻译该文本（源语言与目标语言相同）",
+        "有道判定为 {}，原样返回；可在工作流 [X] 面板调整 yd_to / yd_cn_to，或换个写法".format(pair),
+    )
+
+
+def render(cfg, orig, norm, data):
+    """把 API 响应渲染成 Alfred JSON（含回显提示与空结果兜底）。"""
+    if is_passthrough(data):
+        return output([passthrough_item(data)])
+    items = build_items(cfg, orig, norm, data)
+    if not items:
+        return output([error_item(
+            "未获取到翻译结果",
+            "有道未返回可展示的内容（无译文/释义），可稍后重试或换个说法",
+        )])
+    return output(items)
+
+
+def alternate_target(to, cfg):
+    """换一个目标语言（在 yd_to / yd_cn_to 中取与当前不同的那个）。
+
+    两者配置相同时返回空串，调用方据此跳过重试，避免死循环。
+    """
+    for candidate in (cfg.to, cfg.cn_to):
+        if candidate and candidate != to:
+            return candidate
+    return ""
+
+
+def api_text_for(text, to):
+    """按目标语言决定发送给 API 的文本：中文目标下先保护已有中文片段。
+
+    返回 (发送文本, 被保护的片段列表)；不需要保护时原样返回，列表为空。
+    """
+    if should_mask(text, to):
+        return mask_han(text)
+    return text, []
+
+
+def _first_translation(data):
+    """响应里的首条译文（无则空串）。"""
+    translation = (data or {}).get("translation") or []
+    if translation and isinstance(translation[0], str):
+        return translation[0]
+    return ""
+
+
+def restore_masked(data, original, runs):
+    """把响应里被打码的中文片段还原（译文、query 回显、发音 URL）。"""
+    if not runs:
+        return data
+    data = dict(data)
+    translation = data.get("translation")
+    if isinstance(translation, list):
+        data["translation"] = [
+            unmask_text(item, runs) if isinstance(item, str) else item
+            for item in translation
+        ]
+    # 有道会回显 query；改回用户原文，避免字幕里出现占位符
+    if isinstance(data.get("query"), str):
+        data["query"] = original
+    # 发音 URL 若带标记，用还原后的词重建（避免 %5B%5BC0%5D%5D 这类编码）
+    word = _first_translation(data) or original
+    for field, voice in (("speakUrl", "en"), ("tSpeakUrl", "uk")):
+        url = data.get(field)
+        if isinstance(url, str) and "[[C" in url:
+            data[field] = fallback_speak_url(word, voice)
+    return data
+
+
+def _wait_or_skip(limiter):
+    """过限速闸门：可等则 sleep 并返回 True；不可等返回 False（本次跳过）。"""
+    action, wait = limiter.wait_time()
+    if action == RateLimiter.BLOCKED or (action == RateLimiter.WAIT and wait > MAX_SLEEP):
+        return False
+    if action == RateLimiter.WAIT:
+        time.sleep(wait)
+    return True
+
+
+def translate_once(client, text, to, limiter):
+    """发起一次真实翻译（带中文片段保护），返回已还原的响应 dict。
+
+    若模型吞掉占位符（实测未发生），降级为未掩码请求以保证内容完整——宁可
+    退化成「公司→五星」也不丢字；降级请求受限速闸门约束，闸门不放行则沿用
+    掩码结果。YoudaoError 由调用方处理。
+    """
+    api_text, runs = api_text_for(text, to)
+    limiter.record()
+    raw = client.translate(api_text, to)
+    data = restore_masked(raw, text, runs)
+    if runs and not placeholders_intact(_first_translation(raw), runs) and _wait_or_skip(limiter):
+        limiter.record()
+        data = client.translate(text, to)
+    return data
+
+
+def rate_limited_item(limiter, cooldown):
+    """411 冷却提示行（进入指数冷却）。"""
+    seconds = limiter.set_cooldown(cooldown)
+    return error_item(
+        "👻 访问频率受限（411）",
+        "已进入 {} 秒冷却期（连续 411 会指数延长），期间不再调用 API".format(int(seconds)),
+    )
 
 
 def handle_command(cmd, rest, cfg):
@@ -193,7 +309,8 @@ def main(argv=None):
             "约 {} 秒后自动恢复，期间不再调用 API".format(int(remaining) + 1),
         )]
         cached = cache.get(key, now)
-        if cached is not None:
+        # 回显式缓存不贴到"冷却中"提示下面（它等于没翻译）
+        if cached is not None and not is_passthrough(cached):
             items += build_items(cfg, query, norm, cached)
         print(output(items))
         return
@@ -217,7 +334,7 @@ def main(argv=None):
     # 3) 缓存命中：直接重建结果，零调用
     cached = cache.get(key, now)
     if cached is not None:
-        print(output(build_items(cfg, query, norm, cached)))
+        print(render(cfg, query, norm, cached))
         return
 
     # 4) 最短长度：单个 ASCII 字符查询基本无意义，纯耗免费额度
@@ -240,19 +357,31 @@ def main(argv=None):
         time.sleep(wait)
 
     client = YoudaoClient(cfg.key, cfg.secret, sign_mode=cfg.sign)
-    limiter.record()  # 记录本次真实调用（发起请求时）
     try:
-        data = client.translate(norm, to)
+        data = translate_once(client, norm, to, limiter)
     except YoudaoError as exc:
         if str(exc.code) == "411":
-            seconds = limiter.set_cooldown(cfg.cooldown)
-            print(output([error_item(
-                "👻 访问频率受限（411）",
-                "已进入 {} 秒冷却期（连续 411 会指数延长），期间不再调用 API".format(int(seconds)),
-            )]))
+            print(output([rate_limited_item(limiter, cfg.cooldown)]))
         else:
             print(output([error_item("👻 翻译出错啦", exc.message)]))
         return
+
+    # 回显兜底：源语言 == 目标语言（如 en2en）等于没翻译，换另一个目标语言重试一次
+    alt = alternate_target(to, cfg)
+    if is_passthrough(data) and alt and _wait_or_skip(limiter):
+        retry_error = None
+        try:
+            alt_data = translate_once(client, norm, alt, limiter)
+        except YoudaoError as exc:
+            retry_error = exc
+            alt_data = None
+            if str(exc.code) == "411":
+                limiter.set_cooldown(cfg.cooldown)
+        if alt_data is not None and not is_passthrough(alt_data):
+            data, to = alt_data, alt
+        if retry_error is not None and str(retry_error.code) == "411":
+            print(output([rate_limited_item(limiter, cfg.cooldown)]))
+            return
 
     limiter.note_success()
     # 签名回退记忆：auto 模式下 v3 被拒(202)、v1 成功 → 持久化有效签名方式，
@@ -260,8 +389,9 @@ def main(argv=None):
     if cfg.sign == "auto" and client.effective_sign == "v1":
         save_config({"yd_sign": "v1"})
 
+    # 缓存键按「重试前」计算的目标语言，保证后续同查询稳定命中
     cache.put(key, data)
-    print(output(build_items(cfg, query, norm, data)))
+    print(render(cfg, query, norm, data))
 
 
 if __name__ == "__main__":

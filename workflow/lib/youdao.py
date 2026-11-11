@@ -150,6 +150,42 @@ class YoudaoClient:
         return data
 
 
+def response_lang_pair(data):
+    """从响应中取出有道判定的 (源语言, 目标语言)。
+
+    真实 API 字段为 `l`（如 `en2zh-CHS` / `en2en`），部分响应/测试用 `language`。
+    缺失或格式异常时返回 ("", "")。
+    """
+    raw = (data or {}).get("l") or (data or {}).get("language") or ""
+    if not isinstance(raw, str):
+        return "", ""
+    parts = raw.split("2", 1)
+    if len(parts) != 2:
+        return "", ""
+    return parts[0].strip(), parts[1].strip()
+
+
+def is_passthrough(data):
+    """响应是否为「原样回显」——源语言 == 目标语言，等于没有翻译。
+
+    典型场景：用户把 `to` 设成了文本自身的语言（如英文明细日志被判定为
+    en2en），有道直接把原文返回。优先采用权威信号 `l` 的语种对；无该字段
+    时退回「译文与原文逐字相同」的比较，但**排除**已明确给出异语种的响应
+    （`OK → OK`、URL、哈希等本就同形的短文本不应触发重试）。
+
+    v1.4.0 引入：yd.py 据此自动换另一个目标语言重试一次。
+    """
+    src, dst = response_lang_pair(data)
+    if src and dst:
+        return src.lower() == dst.lower()
+    query = (data or {}).get("query") or ""
+    translation = (data or {}).get("translation") or []
+    if not query or not translation:
+        return False
+    first = translation[0] if isinstance(translation[0], str) else ""
+    return bool(first.strip()) and first.strip() == query.strip()
+
+
 def extract_rows(data):
     """把 API 响应解析为结构化的结果行列表。
 

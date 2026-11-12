@@ -177,6 +177,38 @@ class TestSmoke(unittest.TestCase):
         result, _ = run_yd(["version"], env=ENV)
         self.assertIn("yd-translator v", result["items"][0]["title"])
 
+    def test_long_text_precheck_avoids_api_call(self):
+        # 超过有道单次 5000 字符上限：提前拦截，零调用（不浪费额度）
+        result, calls = run_yd(["word " * 1001], env=ENV)
+        self.assertEqual(calls, {})
+        self.assertFalse(result["items"][0]["valid"])
+        self.assertIn("文本太长", result["items"][0]["title"])
+        self.assertIn("5000", result["items"][0]["subtitle"])
+
+    def test_escape_dot_preserved_in_normal_sentence(self):
+        # 普通句末标点不应被剥掉（只有拼音/链式"输入中"才把 "." 当逃逸口）
+        _, calls = run_yd(["Hello world."], env=ENV)
+        self.assertEqual(calls["q"], "hello world.")
+
+    def test_escape_dot_still_bypasses_defer(self):
+        # 拼音组词态 + 末尾 "." → 仍按逃逸口处理（剥掉句点、立即翻译）
+        _, calls = run_yd(["nihao."], env=ENV)
+        self.assertEqual(calls["q"], "nihao")
+
+    def test_quicklook_encodes_slash(self):
+        # 查询里的 "/" 不能原样留在网页路径中，否则有道 404
+        result, calls = run_yd(["A/B"], env=ENV)
+        self.assertEqual(calls["q"], "A/B")
+        self.assertIn("A%2FB", result["items"][0]["quicklookurl"])
+
+    def test_network_error_has_dedicated_title(self):
+        def boom(q, to):
+            raise yd.YoudaoError(-1, "网络请求失败: boom")
+
+        result, _ = run_yd(["hello"], env=ENV, translate_side_effect=boom)
+        self.assertFalse(result["items"][0]["valid"])
+        self.assertIn("网络请求失败", result["items"][0]["title"])
+
 
 class TestGuardChain(unittest.TestCase):
     """防刷量守卫链：输入演进延迟 / 疑似组词 / 缓存 / 限速 / 411 指数冷却。"""

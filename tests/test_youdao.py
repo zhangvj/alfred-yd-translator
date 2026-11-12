@@ -1,6 +1,8 @@
 """youdao API 客户端测试：v1/v3 签名、参数、解析、错误映射、回退逻辑。"""
 import hashlib
+import io
 import unittest
+import urllib.error
 from unittest import mock
 
 from workflow.lib import youdao
@@ -170,10 +172,97 @@ class TestClient(unittest.TestCase):
     def test_translate_network_error(self):
         with mock.patch.object(
             youdao.urllib.request, "urlopen", side_effect=OSError("boom")
-        ):
+        ), mock.patch.object(youdao.time, "sleep"):
             with self.assertRaises(YoudaoError) as ctx:
                 YoudaoClient("k", "s", sign_mode="v3").translate("api", "zh-CHS")
+        self.assertEqual(ctx.exception.code, -1)
         self.assertIn("网络", ctx.exception.message)
+        self.assertIn("已自动重试 1 次", ctx.exception.message)
+
+    def test_integer_error_code_zero_is_success(self):
+        """部分网关把 errorCode 返回成整数 0，不应被误判为失败。"""
+        with _patch_urlopen([dict(FAKE_RESPONSE, errorCode=0)]):
+            data = YoudaoClient("k", "s", sign_mode="v3").translate("api", "zh-CHS")
+        self.assertEqual(data["translation"], ["应用程序编程接口"])
+
+    def test_missing_error_code_field(self):
+        with _patch_urlopen([{"translation": ["x"], "query": "x"}]):
+            with self.assertRaises(YoudaoError) as ctx:
+                YoudaoClient("k", "s", sign_mode="v3").translate("api", "zh-CHS")
+        self.assertEqual(ctx.exception.code, -1)
+        self.assertIn("errorCode", ctx.exception.message)
+
+    def test_network_error_retries_once_when_fast(self):
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(req)
+            if len(calls) == 1:
+                raise OSError("boom")
+            resp = mock.MagicMock()
+            resp.__enter__.return_value = resp
+            resp.read.return_value = __import__("json").dumps(
+                FAKE_RESPONSE).encode("utf-8")
+            return resp
+
+        with mock.patch.object(
+            youdao.urllib.request, "urlopen", side_effect=fake_urlopen
+        ), mock.patch.object(youdao.time, "sleep"):
+            data = YoudaoClient("k", "s", sign_mode="v3").translate("api", "zh-CHS")
+        self.assertEqual(len(calls), 2)          # 快速失败 → 自动重试一次
+        self.assertEqual(data["translation"], ["应用程序编程接口"])
+
+    def test_network_error_no_retry_when_slow(self):
+        # fail_fast_window=0 视为慢失败：不重试，避免读超时叠加成 2 倍等待
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(req)
+            raise OSError("boom")
+
+        with mock.patch.object(
+            youdao.urllib.request, "urlopen", side_effect=fake_urlopen
+        ), mock.patch.object(youdao.time, "sleep"):
+            client = YoudaoClient("k", "s", sign_mode="v3", fail_fast_window=0)
+            with self.assertRaises(YoudaoError):
+                client.translate("api", "zh-CHS")
+        self.assertEqual(len(calls), 1)
+
+    def test_http_4xx_not_retried(self):
+        err = urllib.error.HTTPError(
+            "https://openapi.youdao.com/api", 403, "Forbidden", {}, io.BytesIO(b""))
+        self.addCleanup(err.close)
+        with mock.patch.object(
+            youdao.urllib.request, "urlopen", side_effect=err
+        ), mock.patch.object(youdao.time, "sleep"):
+            with self.assertRaises(YoudaoError) as ctx:
+                YoudaoClient("k", "s", sign_mode="v3").translate("api", "zh-CHS")
+        self.assertIn("403", ctx.exception.message)
+
+    def test_user_agent_carries_version(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["ua"] = [
+                v for k, v in req.header_items() if k.lower() == "user-agent"
+            ][0]
+            resp = mock.MagicMock()
+            resp.__enter__.return_value = resp
+            resp.read.return_value = __import__("json").dumps(
+                FAKE_RESPONSE).encode("utf-8")
+            return resp
+
+        with mock.patch.object(
+            youdao.urllib.request, "urlopen", side_effect=fake_urlopen
+        ):
+            YoudaoClient("k", "s", sign_mode="v3").translate("api", "zh-CHS")
+        self.assertIn("yd-translator/{}".format(youdao.__version__), captured["ua"])
+
+    def test_error_message_table_covers_common_codes(self):
+        with _patch_urlopen([{"errorCode": "203"}]):
+            with self.assertRaises(YoudaoError) as ctx:
+                YoudaoClient("k", "s", sign_mode="v3").translate("api", "zh-CHS")
+        self.assertIn("IP", ctx.exception.message)
 
 
 class TestPassthrough(unittest.TestCase):

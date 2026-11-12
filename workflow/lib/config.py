@@ -30,6 +30,7 @@
 """
 import json
 import os
+import tempfile
 
 from .guard import (
     DEFAULT_CHAIN_WINDOW,
@@ -73,15 +74,30 @@ def load_saved(env=None):
 
 
 def save_config(updates, env=None):
-    """合并写入 config.json（保留已有字段），权限 600。返回写入路径。"""
+    """合并写入 config.json（保留已有字段），权限 600。返回写入路径。
+
+    原子写入：同目录临时文件 + os.replace，避免进程中断留下半截 JSON
+    （config.json 里存着 key/secret，损坏会导致下次查询报"未配置"）。
+    """
     env = os.environ if env is None else env
     data_dir = get_data_dir(env)
     os.makedirs(data_dir, exist_ok=True)
     data = load_saved(env)
     data.update(updates)
     path = os.path.join(data_dir, CONFIG_FILENAME)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    tmp = ""
+    try:
+        fd, tmp = tempfile.mkstemp(dir=data_dir, suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except OSError:
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        raise
     try:
         os.chmod(path, 0o600)
     except OSError:

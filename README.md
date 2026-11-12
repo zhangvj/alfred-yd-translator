@@ -34,7 +34,8 @@
 │   └── lib/
 │       ├── normalizer.py     # ★ 智能文本规范化（核心）
 │       ├── detect.py         # 语言检测（汉字/假名/谚文）
-│       ├── youdao.py         # 有道 API 客户端（v3 签名）
+│       ├── youdao.py         # 有道 API 客户端（v3/v1 签名、重试、错误码）
+│       ├── protect.py        # 中文片段保护（掩码 → 翻译 → 还原）
 │       ├── pinyin.py         # ★ 拼音组词中间态检测（防误触发）
 │       ├── guard.py          # ★ 防刷量守卫（缓存/限速/链式合并/指数冷却）
 │       ├── output.py         # Alfred Script Filter JSON 构建器
@@ -123,6 +124,7 @@ key/secret 会写入 Alfred 的 **Workflow Data 目录**
 | 选中文字 + 热键 | 直接翻译选中内容 |
 | `yd setkey` / `yd setsecret` | 保存凭据到数据目录（更新保留） |
 | `yd config` / `yd reset` | 查看配置 / 清除凭据 |
+| `yd version` | 查看当前版本（v1.6.0 起更常用） |
 
 > **防抖（debounce）**：Script Filter 内置 600ms 输入防抖
 > （Run Behaviour → Queue Delay = 0.6s，自定义），停止输入 600ms 后才请求翻译 API，
@@ -231,19 +233,48 @@ key/secret 会写入 Alfred 的 **Workflow Data 目录**
 > 固有行为，本插件不做自动"修复"（自动改空格有改错真实空格的风险）。
 
 
+### 稳定性与细节优化（v1.6.0）
+
+这一版不加新配置项，全部是"少踩坑"的修正：
+
+- **Open URL 不再二次编码**：`Shift+Enter`（打开有道网页）和 `Alt+Enter`（在线发音）
+  传给 Open URL 对象的已经是**完整且已编码的 URL**；Alfred 默认会把 `{query}`
+  当查询参数再编码一次（变成 `https%3A%2F%2F...` 或 `?audio%3D...`，导致打不开）。
+  现已为两个 Open URL 对象设置 `skipqueryencode` / `skipvarencode`，URL 原样打开。
+- **热键预置「Selection in macOS」**：Hotkey 的 Argument 已设为 1（选中文字），
+  录完组合键即可直接翻译选中文字，不必再手动改 Argument。
+- **网络失败自动重试 1 次**：仅对"快速失败"（3 秒内且非 HTTP 4xx）重试，
+  避免读超时叠加成两倍等待；网络错误单独显示「🌐 网络请求失败」。
+- **错误码提示补全**：203（IP 白名单）、206（系统时间）、301/302/303/304
+  （查询/服务异常）、309/310/412（请求超限）、401（欠费）等；兼容返回整数
+  `errorCode: 0` 的网关，`errorCode` 缺失时也不再抛 `AttributeError`。
+- **超长文本提前拦截**：超过有道单次 5000 字符上限时直接提示「文本太长」，
+  不再发注定失败、白耗免费额度的请求。
+- **句末标点保留**：`Hello world.` 会带着句号翻译；末尾 `.` 作为"立即翻译"逃逸口
+  只在拼音组词/逐词上屏等"输入中"场景生效（`nihao.` 仍立即翻译）。
+- **config.json 原子写入**：先写同目录临时文件再 `os.replace`，进程中断也不会
+  把 key/secret 写坏。
+- **`say` 参数安全**：本地发音改为 `say -- <词>`，以 `-` 开头的词（如 `-n`）
+  不会被当成命令行参数；空词不再触发发音。
+
+> 回归保障：新增 `tests/test_plist.py`（12 例），把"对象版本兼容、Open URL 编码、
+> modifiers 连接与 JSON `mods` 一一对应、Enter→复制→隐藏、热键 Argument、版本同步"
+> 全部锁进单元测试——这几类问题不会在 Python 逻辑测试里暴露。
+
 ### 配置翻译选中文字的热键
 
 工作流内置 Hotkey 触发器（默认未绑定，避免冲突）：
 
 1. 双击工作流画布中的 **Hotkey** 对象
 2. 点击 Record Hotkey 设置组合键（推荐 `⌥⌥` 双击 Alt，或 `⌘⇧D`）
-3. **Argument 选择「Selection in macOS」**，使热键把选中文字传给翻译
+3. **Argument 已预置「Selection in macOS」**（v1.6.0 起无需手动改；若你的副本显示
+   None/No Argument，请改回，否则热键拿不到选中文字）
 4. 若选中文本无效：系统设置 → 隐私与安全性 → 辅助功能 → 勾选 Alfred
 
 ## 开发与测试
 
 ```bash
-make test                # 运行全部单元测试（normalizer 规格表 / 签名 / 解析 / 拼音组词 / 防刷守卫 / 冒烟）
+make test                # 运行全部单元测试（normalizer 规格表 / 签名 / 解析 / 拼音组词 / 防刷守卫 / plist 回归 / 冒烟）
 python3 workflow/yd.py "API"        # 终端直接调试（未配置 key 时给出提示）
 yd_key=xxx yd_secret=yyy python3 workflow/yd.py "HTTPRequest"   # 带 key 调试
 ```
@@ -256,7 +287,7 @@ yd_key=xxx yd_secret=yyy python3 workflow/yd.py "HTTPRequest"   # 带 key 调试
 |---|---|
 | `workflow/lib/__init__.py` 的 `__version__` | **唯一版本号**，改版本只改这一处 |
 | `workflow/info.plist` 的 `<version>` | Alfred 工作流列表显示的版本，`make build` 自动同步 |
-| git tag `v1.5.0` | 发布标记（相当于 npm 的 dist-tag） |
+| git tag `v1.6.0` | 发布标记（相当于 npm 的 dist-tag） |
 | `yd version` 命令 | Alfred 内随时查看版本 |
 | `CHANGELOG.md` | 各版本更新日志（发布 Release 时可直接用作说明） |
 

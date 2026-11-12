@@ -3,6 +3,50 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 格式；
 版本号单一事实来源见 `workflow/lib/__init__.py`，发布以 git tag 标记。
 
+## [1.6.0] - 2026-11-11
+
+Alfred 集成与请求健壮性优化，无新增配置项、向后兼容旧行为。
+
+### Fixed
+
+- **Open URL 二次编码**：`Shift+Enter`（打开网页）/ `Alt+Enter`（在线发音）传入的是
+  已编码的完整 URL，但 Alfred 的 Open URL 对象默认会把 `{query}` 当查询参数再编码
+  一次（`https%3A%2F%2F…`、`?audio%3D…`），导致页面/音频打不开或地址异常。
+  两个 openurl 对象补上 `skipqueryencode=true` + `skipvarencode=true`。
+- **热键 Argument 预置**：Hotkey 对象 `argument` 由 0（无参数）改为 1
+  （Selection in macOS），录完组合键即可翻译选中文字，无需再手动设置。
+- **网页预览 URL 的 `/`**：`quicklook` 改用 `urllib.parse.quote(safe="")`，
+  `A/B` 这类查询不再把有道网页路径拆坏。
+- **网络瞬时失败自动重试**：仅对"快速失败"（<3 秒且非 HTTP 4xx）重试 1 次，
+  避免读超时叠加成两倍等待；网络错误独立显示「🌐 网络请求失败」而非
+  「👻 翻译出错啦」。
+- **错误码健壮性**：兼容整数 `errorCode: 0`；`errorCode` 缺失或响应非 JSON 对象时
+  给出明确提示，不再抛出 `AttributeError`；补全 104-107/109/201/203/205/206/207/
+  301/302/303/304/308/309/310/401/412 的中文提示。
+- **config.json 原子写入**：同目录临时文件 + `os.replace`，进程中断不会写坏
+  key/secret。
+- **`say` 参数注入**：`yd_speak.py` 改为 `say -- <词>`，以 `-` 开头的词（如 `-n`）
+  不会被当成命令行参数；空词不再调用 `say`。
+- **超长文本提前拦截**：`len(norm) > 5000` 直接提示「文本太长」，不再发注定失败、
+  白耗免费额度的请求。
+- **句末标点保留**：末尾 `.`/`。` 仅在"拼音组词 / 链式输入 / 与上次查询相同"时
+  作为逃逸口剥掉；普通句末标点（`Hello world.`）保留并参与翻译。
+
+### Added
+
+- `tests/test_plist.py`（12 例）：对象版本兼容性、Open URL 编码配置、modifiers
+  连接与 JSON `mods` 一一对应、Enter→复制→隐藏、热键 Argument、版本同步、
+  凭据不导出、连接引用完整性。
+- `tests/test_youdao.py` 新增 7 例：快速失败重试 / 慢失败不重试 / HTTP 4xx 不重试 /
+  整数 errorCode / 缺失 errorCode / 错误码表 / User-Agent 带版本号。
+- `tests/test_smoke.py` 新增 5 例：超长文本零调用、句末标点保留、逃逸口仍生效、
+  quicklook 编码、网络错误标题。
+
+### Changed
+
+- User-Agent 由硬编码 `yd-translator/1.0` 改为 `yd-translator/<当前版本>`。
+- `tts.fallback_speak_url()` 的 `audio` 参数改为全编码（`/` 也编码）。
+
 ## [1.5.0] - 2026-11-10
 
 修复「中英混排长文本里的中文片段被译错」：目标语言是中文时，文本中本来就已经

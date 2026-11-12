@@ -26,7 +26,8 @@ from lib.protect import (                                    # noqa: E402
 )
 from lib.tts import fallback_speak_url, pick_speak_url        # noqa: E402
 from lib.youdao import (                                    # noqa: E402
-    YoudaoClient, YoudaoError, extract_rows, is_passthrough, response_lang_pair,
+    API_QUERY_MAX_CHARS, YoudaoClient, YoudaoError, extract_rows,
+    is_passthrough, response_lang_pair,
 )
 
 # 限速等待超过该秒数时不再 sleep，直接提示用户稍候（避免卡住 Alfred 界面）
@@ -52,7 +53,7 @@ def _stdout_utf8():
 def build_items(cfg, orig, norm, data):
     """把 API 响应组装为 Alfred 结果行。"""
     items = []
-    quicklook = "https://www.youdao.com/w/" + urllib.parse.quote(orig)
+    quicklook = "https://www.youdao.com/w/" + urllib.parse.quote(orig, safe="")
     tts_url, tts_label = pick_speak_url(data, voice=cfg.voice)
     subtitle = orig if orig == norm else "{} → {}".format(orig, norm)
 
@@ -276,20 +277,8 @@ def main(argv=None):
         )]))
         return
 
-    # 逃逸口：末尾 "." / "。" 表示"确要立即翻译"，跳过输入演进/疑似组词的延迟判定
-    core = query.rstrip(".。")
-    force = core != query
-    if force:
-        query = core.strip()
-
-    norm = normalize(query)
-    if not norm:
-        print(output([error_item("无法翻译该内容", "未识别到可翻译的文字")]))
-        return
-
-    to = target_lang(norm, to=cfg.to, cn_to=cfg.cn_to)
-
     # ---- 防刷量守卫（详见 lib/guard.py / lib/pinyin.py）----
+    # 先建对象：下面的"逃逸口"判定需要读取上一次查询（链式合并）
     data_dir = get_data_dir()
     cache = ResponseCache(data_dir, ttl=cfg.cache_ttl)
     limiter = RateLimiter(
@@ -298,8 +287,31 @@ def main(argv=None):
         window=cfg.rate_window,
         max_per_window=cfg.max_per_window,
     )
-    key = cache_key(norm, to)
     now = time.time()
+
+    # 逃逸口：末尾 "." / "。" 表示"确要立即翻译"（如拼音 `nihao.`），跳过延迟判定。
+    # 只有句点确实用于绕开"输入中"判定时才剥掉；普通句末标点（`Hello world.`）
+    # 原样保留，避免翻译时丢失标点。
+    force = False
+    core = query.rstrip(".。")
+    if core.strip() and core != query:
+        candidate = core.strip()
+        suspected = cfg.pinyin_guard and (
+            is_composition(candidate) or is_pinyin_suspect(candidate))
+        last_query, _ = limiter.last_visit()
+        if (suspected
+                or last_query == candidate
+                or limiter.chain_related(candidate, now, cfg.chain_window)):
+            query = candidate
+            force = True
+
+    norm = normalize(query)
+    if not norm:
+        print(output([error_item("无法翻译该内容", "未识别到可翻译的文字")]))
+        return
+
+    to = target_lang(norm, to=cfg.to, cn_to=cfg.cn_to)
+    key = cache_key(norm, to)
 
     # 1) 411 指数冷却期：完全不调用 API，有缓存则附带缓存结果
     remaining = limiter.cooldown_remaining(now)
@@ -337,7 +349,15 @@ def main(argv=None):
         print(render(cfg, query, norm, cached))
         return
 
-    # 4) 最短长度：单个 ASCII 字符查询基本无意义，纯耗免费额度
+    # 4) 单次上限 5000 字符：提前拦截，避免注定失败的一次调用
+    if len(norm) > API_QUERY_MAX_CHARS:
+        print(output([error_item(
+            "文本太长（{} 字符）".format(len(norm)),
+            "有道单次翻译上限 {} 字符；请拆成多段再分别翻译".format(API_QUERY_MAX_CHARS),
+        )]))
+        return
+
+    # 5) 最短长度：单个 ASCII 字符查询基本无意义，纯耗免费额度
     if cfg.min_len > 0 and len(norm) < cfg.min_len and not has_cjk(norm):
         print(output([error_item(
             "再多输入几个字符",
@@ -345,7 +365,7 @@ def main(argv=None):
         )]))
         return
 
-    # 5) 限速：距上次调用过近则补足间隔；窗口内超限则放弃本次请求
+    # 6) 限速：距上次调用过近则补足间隔；窗口内超限则放弃本次请求
     action, wait = limiter.wait_time()
     if action == RateLimiter.BLOCKED or (action == RateLimiter.WAIT and wait > MAX_SLEEP):
         print(output([error_item(
@@ -362,6 +382,8 @@ def main(argv=None):
     except YoudaoError as exc:
         if str(exc.code) == "411":
             print(output([rate_limited_item(limiter, cfg.cooldown)]))
+        elif str(exc.code) == "-1":
+            print(output([error_item("🌐 网络请求失败", exc.message)]))
         else:
             print(output([error_item("👻 翻译出错啦", exc.message)]))
         return

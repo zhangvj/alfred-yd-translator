@@ -9,7 +9,7 @@ def fallback_speak_url(word, voice="en"):
     """dictvoice 兜底 URL。voice: en(美音 type=2) / uk(英音 type=1)。"""
     audio_type = 2 if voice == "en" else 1
     return "{}?audio={}&type={}".format(
-        DICTVOICE_URL, urllib.parse.quote(word), audio_type
+        DICTVOICE_URL, urllib.parse.quote(word, safe=""), audio_type
     )
 
 

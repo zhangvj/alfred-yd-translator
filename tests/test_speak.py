@@ -15,9 +15,20 @@ class TestSpeak(unittest.TestCase):
         with mock.patch.object(yd_speak.subprocess, "Popen") as popen:
             yd_speak.speak("hello")
         args = popen.call_args[0][0]
-        self.assertEqual(args, ["say", "hello"])
+        # "--" 终止选项解析，避免以 "-" 开头的词被 say 当成参数
+        self.assertEqual(args, ["say", "--", "hello"])
         # 非阻塞：不等待 say 结束（communicate 不应被调用）
         self.assertEqual(popen.return_value.communicate.call_count, 0)
+
+    def test_leading_dash_word_not_treated_as_option(self):
+        with mock.patch.object(yd_speak.subprocess, "Popen") as popen:
+            yd_speak.speak("-n")
+        self.assertEqual(popen.call_args[0][0], ["say", "--", "-n"])
+
+    def test_empty_word_does_not_call_say(self):
+        with mock.patch.object(yd_speak.subprocess, "Popen") as popen:
+            yd_speak.speak("")
+        self.assertEqual(popen.call_count, 0)
 
     def test_main_reads_argv(self):
         with mock.patch.object(yd_speak, "speak") as speak, \
